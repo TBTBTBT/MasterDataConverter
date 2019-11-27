@@ -5,7 +5,11 @@ using System.Text;
 using System.Threading.Tasks;
 using System.IO;
 using System.Collections;
-
+using NPOI.SS.UserModel;
+using NPOI.HSSF.UserModel;
+using NPOI.OpenXmlFormats.Spreadsheet;
+using NPOI.SS.Util;
+using NPOI.XSSF.UserModel;
 
 namespace MasterDataConverter
 {
@@ -20,17 +24,189 @@ namespace MasterDataConverter
                 return;
             }
 
+            if (Path.GetExtension(args[0]) == ".xlsx")
+            {
+                ToJson(args);
+            }
+            else
+            {
+                ToExcel(args);
+            }
+        }
+
+        static void ToJson(string[] args)
+        {
+            Console.WriteLine("Convert To Json OK? (y/n)");
+            if (Console.ReadKey().Key != ConsoleKey.Y)
+            {
+                return;
+            }
+
+            var dir = Path.GetDirectoryName(args[0]);
+            var exportPath = dir + "/Master";
+            SafeCreateDirectory(exportPath);
+            XSSFWorkbook book = WorkbookFactory.Create(args[0]) as XSSFWorkbook;
+            Console.WriteLine(book.NumberOfSheets);
+            var defSheet = book.GetSheet("_def");
+            var defs = new Dictionary<string,Dictionary<string,string>>();
+            var defCells = defSheet.GetRow(0).Cells;
+            var defCount = defSheet.GetRow(0).Cells.Select(_ => _.StringCellValue).Distinct().Count();
+            for (var i = 0; i < defCount; i++)
+            {
+                var index = i * 2;
+                var rowIndex = 2;
+                var dic = new Dictionary<string, string>();
+                while (true)
+                {
+                   
+                    var row = defSheet.GetRow(rowIndex);
+                    if (row == null)
+                    {
+                        break;
+                    }
+
+                    if (!row.Any())
+                    {
+                        break;
+                    }
+
+                    if (row.GetCell(index) == null)
+                    {
+                        break;
+                    }
+
+                    if (row.GetCell(index + 1) == null)
+                    {
+                        break;
+                    }
+                    //名前、数字の順
+                    dic.Add(row.GetCell(index+1).StringCellValue, row.GetCell(index).StringCellValue);
+                    rowIndex++;
+                }
+                defs.Add(defSheet.GetRow(0).GetCell(index).StringCellValue, dic);
+
+
+
+            }
+         
+            for (int i = 0; i < book.NumberOfSheets; i++)
+            {
+                
+                var rowIndex = 2;
+                var sheet = book.GetSheetAt(i);
+                if (sheet.SheetName == "_def")
+                {
+                    continue;
+                }
+                var defines = sheet.GetRow(0).Cells;
+                var types = sheet.GetRow(1).Cells;
+                var list = new List<Dictionary<string, string>>();
+                
+                while (true)
+                {
+                    var dic = new Dictionary<string, string>();
+                    var row = sheet.GetRow(rowIndex);
+                    if (row == null)
+                    {
+                        break;
+                    }
+
+                    if (!row.Any())
+                    {
+                        break;
+                    }
+
+                    if (row.GetCell(0) == null)
+                    {
+                        break;
+                    }
+                    for (int j = 0; j < defines.Count; j++)
+                    {
+                        var cell = row.GetCell(j);
+                        
+                        
+                        if (cell != null)
+                        {
+                            var type = types[j].StringCellValue;
+                            if (defs.ContainsKey(type))
+                            {//enum
+                                dic.Add(defines[j].StringCellValue, defs[type][cell.StringCellValue]);
+                            }
+                            else
+                            {
+                                switch (cell.CellType)
+                                {
+                                    case CellType.Unknown:
+                                        dic.Add(defines[j].StringCellValue, "");
+                                        break;
+                                    case CellType.Numeric:
+                                        dic.Add(defines[j].StringCellValue, cell.NumericCellValue.ToString());
+                                        break;
+                                    case CellType.String:
+                                        dic.Add(defines[j].StringCellValue, cell.StringCellValue);
+                                        break;
+                                    case CellType.Formula:
+                                        dic.Add(defines[j].StringCellValue, "");
+                                        break;
+                                    case CellType.Blank:
+                                        dic.Add(defines[j].StringCellValue, "");
+                                        break;
+                                    case CellType.Boolean:
+                                        dic.Add(defines[j].StringCellValue, cell.BooleanCellValue.ToString());
+                                        break;
+                                    case CellType.Error:
+                                        break;
+                                    default:
+                                        throw new ArgumentOutOfRangeException();
+                                }
+                            }
+                        }
+                        else
+                        {
+                            dic.Add(defines[j].StringCellValue, "");
+                        }
+                    }
+                    list.Add(dic);
+                    rowIndex++;
+
+
+
+                }
+                var json = MiniJSON.Json.Serialize(list);
+                File.WriteAllText(exportPath + "/" + sheet.SheetName, json);
+                Console.WriteLine(exportPath + "/" + sheet.SheetName +" : " +  list.Count + " Colums");
+
+            }
+            Console.WriteLine("end");
+            Console.ReadKey();
+        }
+        static void ToExcel(string[] args)
+        {
+            Console.WriteLine("Convert To Excel OK? (y/n)");
+            if (Console.ReadKey().Key != ConsoleKey.Y)
+            {
+                return;
+            }
+            //Console.ReadKey();
+            if (args.Length == 0)
+            {
+                Console.WriteLine("Please Drag and Drop");
+                Console.ReadKey();
+                return;
+            }
+
             string path = args[0];
             var jsonPath = path + @"\ExportedMasterDefine";
             var masterPath = jsonPath + @"\master.json";
+            var masterconfPath = jsonPath + @"\master_conf.json";
             var masterdefPath = jsonPath + @"\master_def.json";
-            var masterDataPath = path + @"\Assets\Resources\Master";
+            var masterDataPath = path + @"\Assets\Resources";
             if (
                 !Directory.Exists(jsonPath) ||
                 !Directory.Exists(masterDataPath) ||
-                !File.Exists(masterPath) || 
+                !File.Exists(masterPath) ||
                 !File.Exists(masterdefPath)
-                )
+            )
             {
                 Console.WriteLine("Master: " + masterDataPath);
                 Console.WriteLine("Json  : " + jsonPath);
@@ -41,22 +217,228 @@ namespace MasterDataConverter
                 Console.ReadKey();
                 return;
             }
-            Console.WriteLine("Dir  : " + path);          
+
+            Console.WriteLine("Dir  : " + path);
             Console.WriteLine("Json : " + jsonPath);
             var masterjsontext = File.ReadAllText(masterPath);
             var masterdefjsontext = File.ReadAllText(masterdefPath);
-
-            Console.ReadKey();
+            var masterconfjsontext = File.ReadAllText(masterconfPath);
+            //Console.ReadKey();
 
             var masterjson = MiniJSON.Json.Deserialize(masterjsontext);
             var masterdefjson = MiniJSON.Json.Deserialize(masterdefjsontext);
-            
+            var masterconfjson = MiniJSON.Json.Deserialize(masterconfjsontext);
+            //Console.ReadKey();
+
+
+
+            var bookRootPath = path + @"\ExportedMasterExcel";
+            var bookPath = bookRootPath + @"\master_01.xlsx";
+            var book = CreateNewBook(bookPath);
+
+
+            var dataDef = masterdefjson as Dictionary<string, object>;
+            var dataConf = masterconfjson as Dictionary<string, object>;
+            var data = masterjson as Dictionary<string, object>;
+            ICellStyle stylethin = book.CreateCellStyle();
+            stylethin.BorderTop = BorderStyle.Thin;
+            stylethin.BorderRight = BorderStyle.Thin;
+            stylethin.BorderBottom = BorderStyle.Thin;
+            stylethin.BorderTop = BorderStyle.Thin;
+
+            foreach (var keyValuePair in data)
+            {
+                if (!dataConf.ContainsKey(keyValuePair.Key))
+                {
+                    continue;
+                }
+                var conf = dataConf[keyValuePair.Key] as Dictionary<string, object>;
+                var sheetName = Path.GetFileName(conf["path"].ToString());
+                var col = 0;
+                var sheet = book.CreateSheet(sheetName);
+                Console.WriteLine(keyValuePair.Key);
+                var value = keyValuePair.Value as Dictionary<string, object>;
+                foreach (var valuePair in value)
+                {
+                    WriteCell(sheet, col, 0, valuePair.Key, stylethin);
+                    WriteCell(sheet, col, 1, valuePair.Value.ToString(), stylethin);
+                    var key = valuePair.Value.ToString();
+                    if (dataDef.ContainsKey(key))
+                    {
+                        //enum
+                        CellRangeAddressList addressList = new CellRangeAddressList(
+                            2,
+                            100,
+                            col,
+                            col
+                        );
+
+
+                        var dataList = dataDef[key] as Dictionary<string, object>;
+                        string[] converted = dataList.Values.ToList().ConvertAll(_ => _ as string).ToArray();
+                        XSSFDataValidationHelper dvHelper = new XSSFDataValidationHelper(sheet as XSSFSheet);
+                        XSSFDataValidationConstraint dvConstraint
+                            = (XSSFDataValidationConstraint) dvHelper.CreateExplicitListConstraint(converted);
+                        XSSFDataValidation dataValidation =
+                            (XSSFDataValidation) dvHelper.CreateValidation(dvConstraint, addressList);
+                        dataValidation.ShowErrorBox = true;
+                        sheet.AddValidationData(dataValidation);
+                    }
+
+                    Console.WriteLine(" - " + valuePair.Key + " : " + valuePair.Value.ToString());
+                    col++;
+                }
+
+
+                
+                var p = masterDataPath + conf["path"].ToString();
+                if (File.Exists(p))
+                {
+                    var masterdatajsontext = File.ReadAllText(p);
+                    var masterdatajson = MiniJSON.Json.Deserialize(masterdatajsontext);
+                    var masterList = masterdatajson as List<object>;
+                    var col2 = 0;
+                    var row2 = 2;
+                    var defs = value.Values.ToList();
+                    var intStyle = book.CreateDataFormat().GetFormat("#,##0");
+                    var singleStyle = book.CreateDataFormat().GetFormat("#,##0.0");
+                    foreach (object o in masterList)
+                    {
+                        col2 = 0;
+
+                        var list = o as Dictionary<string, object>;
+                        foreach (var valuePair in value)
+                        {
+                            if (list.ContainsKey(valuePair.Key))
+                            {
+                                var v = list[valuePair.Key].ToString();
+                                var def = defs[col2].ToString();
+                                if (dataDef.ContainsKey(def))
+                                {
+                                    //enum
+                                    var dataList = dataDef[def] as Dictionary<string, object>;
+                                    if (dataList.ContainsKey(v))
+                                    {
+                                        v = dataList[v].ToString();
+                                    }
+                                }
+
+                                if (float.TryParse(v, out float arg))
+                                {
+                                    WriteCell(sheet, col2, row2, arg, stylethin);
+                                }
+                                else
+                                {
+                                    WriteCell(sheet, col2, row2, v, stylethin);
+                                }
+
+                                col2++;
+                            }
+
+                        }
+
+                        row2++;
+                    }
+                }
+
+
+            }
+            var defSheet = book.CreateSheet("_def");
+            var dcol = 0;
+            foreach (var keyValuePair in dataDef)
+            {
+                WriteCell(defSheet, dcol, 0, keyValuePair.Key);
+                WriteCell(defSheet, dcol + 1, 0, keyValuePair.Key);
+                WriteCell(defSheet, dcol, 1, "num");
+                WriteCell(defSheet, dcol + 1, 1, "name");
+                var row = 2;
+                var list = keyValuePair.Value as Dictionary<string, object>;
+                foreach (var valuePair in list)
+                {
+                    WriteCell(defSheet, dcol, row, valuePair.Key);
+                    WriteCell(defSheet, dcol + 1,row,valuePair.Value.ToString());
+                    row++;
+                }
+                dcol+=2;
+
+            }
+            SafeCreateDirectory(bookRootPath);
+            using (var fs = File.Create(bookPath))
+            {
+                book.Write(fs);
+            }
+
             Console.ReadKey();
+        }
 
+        static IWorkbook CreateNewBook(string filePath)
+        {
+            IWorkbook book;
+            var extension = Path.GetExtension(filePath);
 
+            // HSSF => Microsoft Excel(xls形式)(excel 97-2003)
+            // XSSF => Office Open XML Workbook形式(xlsx形式)(excel 2007以降)
+            if (extension == ".xls")
+            {
+                book = new HSSFWorkbook();
+            }
+            else if (extension == ".xlsx")
+            {
+                book = new XSSFWorkbook();
+            }
+            else
+            {
+                throw new ApplicationException("CreateNewBook: invalid extension");
+            }
+
+            return book;
+        }
+
+        //セル設定(文字列用)
+        public static ICell WriteCell(ISheet sheet, int columnIndex, int rowIndex, string value,
+            ICellStyle style = null)
+        {
+            var row = sheet.GetRow(rowIndex) ?? sheet.CreateRow(rowIndex);
+            var cell = row.GetCell(columnIndex) ?? row.CreateCell(columnIndex);
+
+            cell.SetCellValue(value);
+            if (style != null)
+            {
+                cell.CellStyle = style;
+            }
+
+            return cell;
+        }
+
+        //セル設定(数値用)
+        public static ICell WriteCell(ISheet sheet, int columnIndex, int rowIndex, double value,
+            ICellStyle style = null)
+        {
+            var row = sheet.GetRow(rowIndex) ?? sheet.CreateRow(rowIndex);
+            var cell = row.GetCell(columnIndex) ?? row.CreateCell(columnIndex);
+
+            cell.SetCellValue(value);
+            if (style != null)
+            {
+                cell.CellStyle = style;
+            }
+
+            return cell;
+        }
+
+        private static DirectoryInfo SafeCreateDirectory(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                return null;
+            }
+
+            return Directory.CreateDirectory(path);
         }
     }
 }
+
+
 /*
  * Copyright (c) 2013 Calvin Rien
  *
