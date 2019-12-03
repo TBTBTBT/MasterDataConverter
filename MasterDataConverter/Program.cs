@@ -332,8 +332,9 @@ namespace MasterDataConverter
                                     WriteCell(sheet, col2, row2, v, stylethin);
                                 }
 
-                                col2++;
+                                
                             }
+                            col2++;
 
                         }
 
